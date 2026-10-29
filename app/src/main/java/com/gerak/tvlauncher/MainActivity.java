@@ -1,109 +1,163 @@
 package com.gerak.tvlauncher;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.os.CountDownTimer;
+import android.provider.Settings;
+import android.view.View;
 import android.widget.TextView;
-import android.widget.VideoView;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
+
+import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
 
-public class MainActivity extends AppCompatActivity {
-    private VideoView bgVideoView;
-    private final Handler timerHandler = new Handler(Looper.getMainLooper());
-    private Runnable timerRunnable;
+public class MainActivity extends Activity {
+
+    private TextView tvClock, tvDate, tvSidebarCounter;
+    private View navAllApps, navSettings;
+    private RecyclerView rvApps;
+    private AppsAdapter adapter;
+    private final List<AppModel> appList = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        initVideo();
-        initCountdown();
-        initApps();
+        initViews();
+        setupClock();
+        setupNavigation();
+        setupAppsGrid();
     }
 
-    private void initVideo() {
-        bgVideoView = findViewById(R.id.bgVideoView);
-        Uri uri = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.bg_gtavi_video);
-        bgVideoView.setVideoURI(uri);
-        bgVideoView.setOnPreparedListener(mp -> {
-            mp.setLooping(true);
-            mp.setVolume(1.0f, 1.0f);
-            bgVideoView.start();
+    private void initViews() {
+        tvClock = findViewById(R.id.tv_clock);
+        tvDate = findViewById(R.id.tv_date);
+        tvSidebarCounter = findViewById(R.id.tv_sidebar_counter);
+        navAllApps = findViewById(R.id.nav_all_apps);
+        navSettings = findViewById(R.id.nav_settings);
+        rvApps = findViewById(R.id.rv_apps);
+    }
+
+    private void setupNavigation() {
+        navAllApps.setSelected(true);
+
+        navSettings.setOnClickListener(v -> {
+            try {
+                Intent intent = new Intent(Settings.ACTION_SETTINGS);
+                startActivity(intent);
+            } catch (Exception ignored) {}
         });
-    }
 
-    private void initCountdown() {
-        TextView tv = findViewById(R.id.tvCountdown);
-        Calendar target = Calendar.getInstance();
-        target.set(2026, Calendar.NOVEMBER, 17, 0, 0, 0);
-        long targetMillis = target.getTimeInMillis();
-
-        timerRunnable = new Runnable() {
-            @Override
-            public void run() {
-                long diff = targetMillis - System.currentTimeMillis();
-                if (diff > 0) {
-                    long days = TimeUnit.MILLISECONDS.toDays(diff);
-                    long h = TimeUnit.MILLISECONDS.toHours(diff) % 24;
-                    long m = TimeUnit.MILLISECONDS.toMinutes(diff) % 60;
-                    long s = TimeUnit.MILLISECONDS.toSeconds(diff) % 60;
-                    tv.setText(String.format(Locale.getDefault(), "%d дн. %02d:%02d:%02d", days, h, m, s));
-                    timerHandler.postDelayed(this, 1000);
-                } else {
-                    tv.setText("ВЫШЛА");
-                }
+        // Анимация фокуса на кнопках сайдбара
+        View.OnFocusChangeListener navFocus = (v, hasFocus) -> {
+            if (hasFocus) {
+                v.animate().scaleX(1.04f).scaleY(1.04f).setDuration(120).start();
+            } else {
+                v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start();
             }
         };
-        timerHandler.post(timerRunnable);
+        navAllApps.setOnFocusChangeListener(navFocus);
+        navSettings.setOnFocusChangeListener(navFocus);
     }
 
-    private void initApps() {
-        RecyclerView rv = findViewById(R.id.appsList);
-        rv.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+    private void setupClock() {
+        updateClock();
+        new CountDownTimer(Long.MAX_VALUE, 1000) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                updateClock();
+            }
 
+            @Override
+            public void onFinish() {}
+        }.start();
+    }
+
+    private void updateClock() {
+        if (tvClock != null) {
+            SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+            tvClock.setText(timeFormat.format(new Date()));
+        }
+        if (tvDate != null) {
+            SimpleDateFormat dateFormat = new SimpleDateFormat("EEEE, d MMMM", new Locale("ru"));
+            String dateStr = dateFormat.format(new Date());
+            tvDate.setText(dateStr.substring(0, 1).toUpperCase(Locale.getDefault()) + dateStr.substring(1));
+        }
+    }
+
+    private void setupAppsGrid() {
+        // Сетка 4 колонки с вертикальным скроллом, как в Arc Launcher
+        GridLayoutManager layoutManager = new GridLayoutManager(this, 4);
+        rvApps.setLayoutManager(layoutManager);
+
+        adapter = new AppsAdapter(this, appList, app -> {
+            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(app.getPackageName());
+            if (launchIntent != null) {
+                startActivity(launchIntent);
+            }
+        });
+        rvApps.setAdapter(adapter);
+        loadInstalledApps();
+    }
+
+    private void loadInstalledApps() {
+        appList.clear();
         PackageManager pm = getPackageManager();
-        Intent intent = new Intent(Intent.ACTION_MAIN, null);
-        intent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        Map<String, AppModel> map = new HashMap<>();
 
-        List<ResolveInfo> activities = pm.queryIntentActivities(intent, 0);
-        if (activities.isEmpty()) {
-            intent = new Intent(Intent.ACTION_MAIN, null);
-            intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            activities = pm.queryIntentActivities(intent, 0);
+        // 1. Android TV приложения (Leanback)
+        Intent leanbackIntent = new Intent(Intent.ACTION_MAIN, null);
+        leanbackIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        List<ResolveInfo> leanbackApps = pm.queryIntentActivities(leanbackIntent, 0);
+        if (leanbackApps != null) {
+            for (ResolveInfo ri : leanbackApps) {
+                String pkg = ri.activityInfo.packageName;
+                if (!pkg.equals(getPackageName())) {
+                    String label = ri.loadLabel(pm).toString();
+                    map.put(pkg, new AppModel(label, pkg, ri.loadIcon(pm)));
+                }
+            }
         }
 
-        List<AppModel> apps = new ArrayList<>();
-        for (ResolveInfo ri : activities) {
-            if (ri.activityInfo.packageName.equals(getPackageName())) continue;
-            apps.add(new AppModel(
-                ri.loadLabel(pm).toString(),
-                ri.activityInfo.packageName,
-                ri.loadIcon(pm)
-            ));
+        // 2. Все обычные (Sideload / планшетные / телефонные) приложения
+        Intent standardIntent = new Intent(Intent.ACTION_MAIN, null);
+        standardIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> standardApps = pm.queryIntentActivities(standardIntent, 0);
+        if (standardApps != null) {
+            for (ResolveInfo ri : standardApps) {
+                String pkg = ri.activityInfo.packageName;
+                if (!pkg.equals(getPackageName()) && !map.containsKey(pkg)) {
+                    String label = ri.loadLabel(pm).toString();
+                    map.put(pkg, new AppModel(label, pkg, ri.loadIcon(pm)));
+                }
+            }
         }
 
-        Collections.sort(apps, (a, b) -> a.label.compareToIgnoreCase(b.label));
-        rv.setAdapter(new AppsAdapter(this, apps));
+        appList.addAll(map.values());
+        Collections.sort(appList, (a, b) -> a.getLabel().compareToIgnoreCase(b.getLabel()));
+
+        if (tvSidebarCounter != null) {
+            tvSidebarCounter.setText(appList.size() + " APPS");
+        }
+
+        adapter.notifyDataSetChanged();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (bgVideoView != null && !bgVideoView.isPlaying()) {
-            bgVideoView.start();
-        }
+        loadInstalledApps();
     }
 }
