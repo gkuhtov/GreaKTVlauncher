@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ArcTV" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowFullscreen">true</item>
-        <item name="android:windowContentOverlay">@null</item>
-        <item name="android:windowBackground">#000000</item>
+    <style name="Theme.AeroLauncher" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@drawable/aero_main_bg</item>
+        <item name="android:textColorPrimary">@color/aero_text_primary</item>
     </style>
 </resources>

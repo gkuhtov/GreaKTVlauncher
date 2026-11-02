@@ -1,16 +1,21 @@
 package com.gerak.tvlauncher;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.provider.Settings;
 import android.view.View;
+import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.text.SimpleDateFormat;
@@ -24,11 +29,23 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
 
-    private TextView tvClock, tvDate, tvSidebarCounter;
-    private View navAllApps, navSettings;
-    private RecyclerView rvApps;
-    private AppsAdapter adapter;
-    private final List<AppModel> appList = new ArrayList<>();
+    private enum PreviewState { APP, LIBRARY, SETTINGS }
+
+    private PreviewState currentState = PreviewState.APP;
+    private TextView tabHome, tabApps, tabSettings;
+    private View viewHome, viewApps;
+    private TextView tvClock, tvAppsSubheader, tvPreviewCategory, tvPreviewTitle, tvPreviewDesc;
+    private ImageView ivPreviewBigLogo;
+    private Button btnPreviewOpen;
+    private View tileBottomApps, tileBottomSettings;
+
+    private RecyclerView rvHomeFavs, rvAllApps;
+    private FavAppsAdapter favAdapter;
+    private GridAppsAdapter gridAdapter;
+
+    private final List<AppModel> allApps = new ArrayList<>();
+    private final List<AppModel> favApps = new ArrayList<>();
+    private AppModel currentSelectedApp = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,127 +54,265 @@ public class MainActivity extends Activity {
 
         initViews();
         setupClock();
-        setupNavigation();
-        setupAppsGrid();
+        setupTabs();
+        loadApps();
     }
 
     private void initViews() {
+        tabHome = findViewById(R.id.tab_home);
+        tabApps = findViewById(R.id.tab_apps);
+        tabSettings = findViewById(R.id.tab_settings);
+
+        viewHome = findViewById(R.id.view_home);
+        viewApps = findViewById(R.id.view_apps);
+
         tvClock = findViewById(R.id.tv_clock);
-        tvDate = findViewById(R.id.tv_date);
-        tvSidebarCounter = findViewById(R.id.tv_sidebar_counter);
-        navAllApps = findViewById(R.id.nav_all_apps);
-        navSettings = findViewById(R.id.nav_settings);
-        rvApps = findViewById(R.id.rv_apps);
+        tvAppsSubheader = findViewById(R.id.tv_apps_subheader);
+        tvPreviewCategory = findViewById(R.id.tv_preview_category);
+        tvPreviewTitle = findViewById(R.id.tv_preview_title);
+        tvPreviewDesc = findViewById(R.id.tv_preview_desc);
+        ivPreviewBigLogo = findViewById(R.id.iv_preview_big_logo);
+        btnPreviewOpen = findViewById(R.id.btn_preview_open);
+
+        tileBottomApps = findViewById(R.id.tile_bottom_apps);
+        tileBottomSettings = findViewById(R.id.tile_bottom_settings);
+
+        rvHomeFavs = findViewById(R.id.rv_home_favs);
+        rvAllApps = findViewById(R.id.rv_all_apps);
+
+        // Верхняя горизонтальная лента
+        rvHomeFavs.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        favAdapter = new FavAppsAdapter(this, favApps, new FavAppsAdapter.OnFavInteractionListener() {
+            @Override
+            public void onFavFocused(AppModel app) {
+                showAppPreview(app);
+            }
+
+            @Override
+            public void onFavClicked(AppModel app) {
+                launchApp(app.getPackageName());
+            }
+        });
+        rvHomeFavs.setAdapter(favAdapter);
+
+        // Сетка «Все приложения» (5 колонок)
+        rvAllApps.setLayoutManager(new GridLayoutManager(this, 5));
+        gridAdapter = new GridAppsAdapter(this, allApps, new GridAppsAdapter.OnAppInteractionListener() {
+            @Override
+            public void onAppClick(AppModel app) {
+                launchApp(app.getPackageName());
+            }
+
+            @Override
+            public void onAppLongClick(AppModel app) {
+                showAppOptions(app);
+            }
+        });
+        rvAllApps.setAdapter(gridAdapter);
+
+        // Реакция центрального баннера на нижние плитки
+        tileBottomApps.setOnFocusChangeListener((v, hasFocus) -> {
+            applyCardScale(v, hasFocus);
+            if (hasFocus) showLibraryPreview();
+        });
+        tileBottomApps.setOnClickListener(v -> switchTab(false));
+
+        tileBottomSettings.setOnFocusChangeListener((v, hasFocus) -> {
+            applyCardScale(v, hasFocus);
+            if (hasFocus) showSettingsPreview();
+        });
+        tileBottomSettings.setOnClickListener(v -> openQuickSettings());
+
+        btnPreviewOpen.setOnClickListener(v -> {
+            if (currentState == PreviewState.LIBRARY) {
+                switchTab(false);
+            } else if (currentState == PreviewState.SETTINGS) {
+                openQuickSettings();
+            } else if (currentSelectedApp != null) {
+                launchApp(currentSelectedApp.getPackageName());
+            }
+        });
     }
 
-    private void setupNavigation() {
-        navAllApps.setSelected(true);
+    private void applyCardScale(View v, boolean hasFocus) {
+        if (hasFocus) {
+            v.animate().scaleX(1.05f).scaleY(1.05f).translationZ(8f).setDuration(120).start();
+        } else {
+            v.animate().scaleX(1.0f).scaleY(1.0f).translationZ(0f).setDuration(120).start();
+        }
+    }
 
-        navSettings.setOnClickListener(v -> {
-            try {
-                Intent intent = new Intent(Settings.ACTION_SETTINGS);
-                startActivity(intent);
-            } catch (Exception ignored) {}
-        });
+    private void setupTabs() {
+        tabHome.setSelected(true);
 
-        // Анимация фокуса на кнопках сайдбара
-        View.OnFocusChangeListener navFocus = (v, hasFocus) -> {
+        tabHome.setOnClickListener(v -> switchTab(true));
+        tabApps.setOnClickListener(v -> switchTab(false));
+        tabSettings.setOnClickListener(v -> openQuickSettings());
+
+        View.OnFocusChangeListener focus = (v, hasFocus) -> {
             if (hasFocus) {
-                v.animate().scaleX(1.04f).scaleY(1.04f).setDuration(120).start();
+                v.animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start();
             } else {
                 v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start();
             }
         };
-        navAllApps.setOnFocusChangeListener(navFocus);
-        navSettings.setOnFocusChangeListener(navFocus);
+
+        tabHome.setOnFocusChangeListener(focus);
+        tabApps.setOnFocusChangeListener(focus);
+        tabSettings.setOnFocusChangeListener(focus);
+        btnPreviewOpen.setOnFocusChangeListener(focus);
+    }
+
+    private void switchTab(boolean isHome) {
+        if (isHome) {
+            tabHome.setSelected(true);
+            tabHome.setTextColor(0xFFFFFFFF);
+            tabApps.setSelected(false);
+            tabApps.setTextColor(0xFF8F9CAE);
+            viewHome.setVisibility(View.VISIBLE);
+            viewApps.setVisibility(View.GONE);
+        } else {
+            tabHome.setSelected(false);
+            tabHome.setTextColor(0xFF8F9CAE);
+            tabApps.setSelected(true);
+            tabApps.setTextColor(0xFFFFFFFF);
+            viewHome.setVisibility(View.GONE);
+            viewApps.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void showAppPreview(AppModel app) {
+        currentState = PreviewState.APP;
+        currentSelectedApp = app;
+        tvPreviewCategory.setText("ПРИЛОЖЕНИЕ");
+        tvPreviewTitle.setText(app.getLabel());
+        tvPreviewDesc.setText("Всё, что ты любишь в " + app.getLabel() + ", — на большом экране");
+        ivPreviewBigLogo.setImageDrawable(app.getIcon());
+        btnPreviewOpen.setText("[O]  Открыть");
+    }
+
+    private void showLibraryPreview() {
+        currentState = PreviewState.LIBRARY;
+        tvPreviewCategory.setText("БИБЛИОТЕКА");
+        tvPreviewTitle.setText("Приложения");
+        tvPreviewDesc.setText(allApps.size() + " приложения · всё установленное на телевизоре");
+        ivPreviewBigLogo.setImageResource(R.drawable.ic_aero_grid);
+        btnPreviewOpen.setText("[O]  Все приложения");
+    }
+
+    private void showSettingsPreview() {
+        currentState = PreviewState.SETTINGS;
+        tvPreviewCategory.setText("AERO TV");
+        tvPreviewTitle.setText("Настройки");
+        tvPreviewDesc.setText("Wi-Fi, Bluetooth, звук и оформление");
+        ivPreviewBigLogo.setImageResource(R.drawable.ic_aero_settings);
+        btnPreviewOpen.setText("[O]  Открыть настройки");
+    }
+
+    private void openQuickSettings() {
+        CharSequence[] items = new CharSequence[] {
+                "Wi-Fi",
+                "Bluetooth",
+                "Звук",
+                "Все настройки ТВ",
+                "Выбрать лаунчер по умолчанию"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Быстрые настройки")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS));
+                    else if (which == 1) startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+                    else if (which == 2) startActivity(new Intent(Settings.ACTION_SOUND_SETTINGS));
+                    else if (which == 3) startActivity(new Intent(Settings.ACTION_SETTINGS));
+                    else if (which == 4) startActivity(new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS));
+                })
+                .show();
+    }
+
+    private void showAppOptions(AppModel app) {
+        CharSequence[] options = new CharSequence[] { "Открыть", "О приложении", "Удалить" };
+        new AlertDialog.Builder(this)
+                .setTitle(app.getLabel())
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) launchApp(app.getPackageName());
+                    else if (which == 1) {
+                        Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                        i.setData(Uri.parse("package:" + app.getPackageName()));
+                        startActivity(i);
+                    } else if (which == 2) {
+                        Intent i = new Intent(Intent.ACTION_DELETE);
+                        i.setData(Uri.parse("package:" + app.getPackageName()));
+                        startActivity(i);
+                    }
+                })
+                .show();
+    }
+
+    private void launchApp(String pkg) {
+        Intent intent = getPackageManager().getLaunchIntentForPackage(pkg);
+        if (intent != null) startActivity(intent);
     }
 
     private void setupClock() {
-        updateClock();
         new CountDownTimer(Long.MAX_VALUE, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
-                updateClock();
+                SimpleDateFormat sdf = new SimpleDateFormat("HH:mm", Locale.getDefault());
+                tvClock.setText(sdf.format(new Date()));
             }
-
             @Override
             public void onFinish() {}
         }.start();
     }
 
-    private void updateClock() {
-        if (tvClock != null) {
-            SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
-            tvClock.setText(timeFormat.format(new Date()));
-        }
-        if (tvDate != null) {
-            SimpleDateFormat dateFormat = new SimpleDateFormat("EEEE, d MMMM", new Locale("ru"));
-            String dateStr = dateFormat.format(new Date());
-            tvDate.setText(dateStr.substring(0, 1).toUpperCase(Locale.getDefault()) + dateStr.substring(1));
-        }
-    }
-
-    private void setupAppsGrid() {
-        // Сетка 4 колонки с вертикальным скроллом, как в Arc Launcher
-        GridLayoutManager layoutManager = new GridLayoutManager(this, 4);
-        rvApps.setLayoutManager(layoutManager);
-
-        adapter = new AppsAdapter(this, appList, app -> {
-            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(app.getPackageName());
-            if (launchIntent != null) {
-                startActivity(launchIntent);
-            }
-        });
-        rvApps.setAdapter(adapter);
-        loadInstalledApps();
-    }
-
-    private void loadInstalledApps() {
-        appList.clear();
+    private void loadApps() {
+        allApps.clear();
+        favApps.clear();
         PackageManager pm = getPackageManager();
         Map<String, AppModel> map = new HashMap<>();
 
-        // 1. Android TV приложения (Leanback)
-        Intent leanbackIntent = new Intent(Intent.ACTION_MAIN, null);
-        leanbackIntent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-        List<ResolveInfo> leanbackApps = pm.queryIntentActivities(leanbackIntent, 0);
-        if (leanbackApps != null) {
-            for (ResolveInfo ri : leanbackApps) {
+        Intent leanback = new Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        List<ResolveInfo> tvList = pm.queryIntentActivities(leanback, 0);
+        if (tvList != null) {
+            for (ResolveInfo ri : tvList) {
                 String pkg = ri.activityInfo.packageName;
                 if (!pkg.equals(getPackageName())) {
-                    String label = ri.loadLabel(pm).toString();
-                    map.put(pkg, new AppModel(label, pkg, ri.loadIcon(pm)));
+                    map.put(pkg, new AppModel(ri.loadLabel(pm).toString(), pkg, ri.loadIcon(pm)));
                 }
             }
         }
 
-        // 2. Все обычные (Sideload / планшетные / телефонные) приложения
-        Intent standardIntent = new Intent(Intent.ACTION_MAIN, null);
-        standardIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> standardApps = pm.queryIntentActivities(standardIntent, 0);
-        if (standardApps != null) {
-            for (ResolveInfo ri : standardApps) {
+        Intent standard = new Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> stdList = pm.queryIntentActivities(standard, 0);
+        if (stdList != null) {
+            for (ResolveInfo ri : stdList) {
                 String pkg = ri.activityInfo.packageName;
                 if (!pkg.equals(getPackageName()) && !map.containsKey(pkg)) {
-                    String label = ri.loadLabel(pm).toString();
-                    map.put(pkg, new AppModel(label, pkg, ri.loadIcon(pm)));
+                    map.put(pkg, new AppModel(ri.loadLabel(pm).toString(), pkg, ri.loadIcon(pm)));
                 }
             }
         }
 
-        appList.addAll(map.values());
-        Collections.sort(appList, (a, b) -> a.getLabel().compareToIgnoreCase(b.getLabel()));
+        allApps.addAll(map.values());
+        Collections.sort(allApps, (a, b) -> a.getLabel().compareToIgnoreCase(b.getLabel()));
 
-        if (tvSidebarCounter != null) {
-            tvSidebarCounter.setText(appList.size() + " APPS");
+        for (int i = 0; i < Math.min(10, allApps.size()); i++) {
+            favApps.add(allApps.get(i));
         }
 
-        adapter.notifyDataSetChanged();
+        tvAppsSubheader.setText(allApps.size() + " приложения · только то, что установлено");
+
+        if (!favApps.isEmpty()) {
+            showAppPreview(favApps.get(0));
+        }
+
+        favAdapter.notifyDataSetChanged();
+        gridAdapter.notifyDataSetChanged();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        loadInstalledApps();
+        loadApps();
     }
 }

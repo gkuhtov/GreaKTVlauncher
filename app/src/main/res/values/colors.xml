@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="aero_bg_dark">#08090D</color>
+    <color name="aero_bg_gradient_start">#111726</color>
+    <color name="aero_tab_active">#1E60E6</color>
+    <color name="aero_tab_inactive">#00000000</color>
+    <color name="aero_tile_focused_stroke">#FFFFFF</color>
+    <color name="aero_text_primary">#FFFFFF</color>
+    <color name="aero_text_secondary">#9DA8BA</color>
+    <color name="aero_text_dimmed">#606D80</color>
+    <color name="aero_accent_blue">#58A6FF</color>
+</resources>
