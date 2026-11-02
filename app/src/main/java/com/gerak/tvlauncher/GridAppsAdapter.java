@@ -10,6 +10,8 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.gerak.tvlauncher.focus.FocusEngine;
+
 import java.util.List;
 
 public class GridAppsAdapter extends RecyclerView.Adapter<GridAppsAdapter.ViewHolder> {
@@ -22,11 +24,18 @@ public class GridAppsAdapter extends RecyclerView.Adapter<GridAppsAdapter.ViewHo
     private final Context context;
     private final List<AppModel> apps;
     private final OnAppInteractionListener listener;
+    private final FocusEngine focusEngine;
 
     public GridAppsAdapter(Context context, List<AppModel> apps, OnAppInteractionListener listener) {
+        this(context, apps, listener, new FocusEngine());
+    }
+
+    public GridAppsAdapter(Context context, List<AppModel> apps,
+                           OnAppInteractionListener listener, FocusEngine focusEngine) {
         this.context = context;
         this.apps = apps;
         this.listener = listener;
+        this.focusEngine = focusEngine != null ? focusEngine : new FocusEngine();
     }
 
     @NonNull
@@ -51,13 +60,7 @@ public class GridAppsAdapter extends RecyclerView.Adapter<GridAppsAdapter.ViewHo
             return true;
         });
 
-        holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
-            if (hasFocus) {
-                v.animate().scaleX(1.08f).scaleY(1.08f).translationZ(10f).setDuration(140).start();
-            } else {
-                v.animate().scaleX(1.0f).scaleY(1.0f).translationZ(0f).setDuration(140).start();
-            }
-        });
+        holder.itemView.setOnFocusChangeListener((v, hasFocus) -> focusEngine.apply(v, hasFocus));
     }
 
     @Override

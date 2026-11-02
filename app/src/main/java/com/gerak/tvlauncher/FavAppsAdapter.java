@@ -11,6 +11,8 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.gerak.tvlauncher.focus.FocusEngine;
+
 import java.util.List;
 
 public class FavAppsAdapter extends RecyclerView.Adapter<FavAppsAdapter.ViewHolder> {
@@ -23,11 +25,18 @@ public class FavAppsAdapter extends RecyclerView.Adapter<FavAppsAdapter.ViewHold
     private final Context context;
     private final List<AppModel> apps;
     private final OnFavInteractionListener listener;
+    private final FocusEngine focusEngine;
 
     public FavAppsAdapter(Context context, List<AppModel> apps, OnFavInteractionListener listener) {
+        this(context, apps, listener, new FocusEngine());
+    }
+
+    public FavAppsAdapter(Context context, List<AppModel> apps,
+                          OnFavInteractionListener listener, FocusEngine focusEngine) {
         this.context = context;
         this.apps = apps;
         this.listener = listener;
+        this.focusEngine = focusEngine != null ? focusEngine : new FocusEngine();
     }
 
     @NonNull
@@ -48,12 +57,11 @@ public class FavAppsAdapter extends RecyclerView.Adapter<FavAppsAdapter.ViewHold
         });
 
         holder.container.setOnFocusChangeListener((v, hasFocus) -> {
+            focusEngine.apply(v, hasFocus);
             if (hasFocus) {
-                v.animate().scaleX(1.08f).scaleY(1.08f).translationZ(8f).setDuration(120).start();
                 holder.tvTitle.setVisibility(View.VISIBLE);
                 if (listener != null) listener.onFavFocused(app);
             } else {
-                v.animate().scaleX(1.0f).scaleY(1.0f).translationZ(0f).setDuration(120).start();
                 holder.tvTitle.setVisibility(View.INVISIBLE);
             }
         });

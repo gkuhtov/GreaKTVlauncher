@@ -18,6 +18,10 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.gerak.tvlauncher.focus.FocusEngine;
+import com.gerak.tvlauncher.settings.QuickSettingsDialog;
+import com.gerak.tvlauncher.theme.ThemeManager;
+
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 public class MainActivity extends Activity {
 
@@ -47,12 +52,21 @@ public class MainActivity extends Activity {
     private final List<AppModel> favApps = new ArrayList<>();
     private AppModel currentSelectedApp = null;
 
+    private PreferencesManager preferencesManager;
+    private ThemeManager themeManager;
+    private FocusEngine focusEngine;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        preferencesManager = new PreferencesManager(this);
+        themeManager = new ThemeManager(preferencesManager);
+        focusEngine = themeManager.createFocusEngine();
+
         initViews();
+        themeManager.applyToActivity(this, findViewById(android.R.id.content));
         setupClock();
         setupTabs();
         loadApps();
@@ -80,87 +94,57 @@ public class MainActivity extends Activity {
         rvHomeFavs = findViewById(R.id.rv_home_favs);
         rvAllApps = findViewById(R.id.rv_all_apps);
 
-        // Верхняя горизонтальная лента
         rvHomeFavs.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         favAdapter = new FavAppsAdapter(this, favApps, new FavAppsAdapter.OnFavInteractionListener() {
             @Override
-            public void onFavFocused(AppModel app) {
-                showAppPreview(app);
-            }
+            public void onFavFocused(AppModel app) { showAppPreview(app); }
 
             @Override
-            public void onFavClicked(AppModel app) {
-                launchApp(app.getPackageName());
-            }
-        });
+            public void onFavClicked(AppModel app) { launchApp(app.getPackageName()); }
+        }, focusEngine);
         rvHomeFavs.setAdapter(favAdapter);
 
-        // Сетка «Все приложения» (5 колонок)
-        rvAllApps.setLayoutManager(new GridLayoutManager(this, 5));
+        int columns = preferencesManager.getColumnsCount();
+        rvAllApps.setLayoutManager(new GridLayoutManager(this, columns));
         gridAdapter = new GridAppsAdapter(this, allApps, new GridAppsAdapter.OnAppInteractionListener() {
             @Override
-            public void onAppClick(AppModel app) {
-                launchApp(app.getPackageName());
-            }
+            public void onAppClick(AppModel app) { launchApp(app.getPackageName()); }
 
             @Override
-            public void onAppLongClick(AppModel app) {
-                showAppOptions(app);
-            }
-        });
+            public void onAppLongClick(AppModel app) { showAppOptions(app); }
+        }, focusEngine);
         rvAllApps.setAdapter(gridAdapter);
 
-        // Реакция центрального баннера на нижние плитки
         tileBottomApps.setOnFocusChangeListener((v, hasFocus) -> {
-            applyCardScale(v, hasFocus);
+            focusEngine.apply(v, hasFocus);
             if (hasFocus) showLibraryPreview();
         });
         tileBottomApps.setOnClickListener(v -> switchTab(false));
 
         tileBottomSettings.setOnFocusChangeListener((v, hasFocus) -> {
-            applyCardScale(v, hasFocus);
+            focusEngine.apply(v, hasFocus);
             if (hasFocus) showSettingsPreview();
         });
         tileBottomSettings.setOnClickListener(v -> openQuickSettings());
 
         btnPreviewOpen.setOnClickListener(v -> {
-            if (currentState == PreviewState.LIBRARY) {
-                switchTab(false);
-            } else if (currentState == PreviewState.SETTINGS) {
-                openQuickSettings();
-            } else if (currentSelectedApp != null) {
-                launchApp(currentSelectedApp.getPackageName());
-            }
+            if (currentState == PreviewState.LIBRARY) switchTab(false);
+            else if (currentState == PreviewState.SETTINGS) openQuickSettings();
+            else if (currentSelectedApp != null) launchApp(currentSelectedApp.getPackageName());
         });
-    }
-
-    private void applyCardScale(View v, boolean hasFocus) {
-        if (hasFocus) {
-            v.animate().scaleX(1.05f).scaleY(1.05f).translationZ(8f).setDuration(120).start();
-        } else {
-            v.animate().scaleX(1.0f).scaleY(1.0f).translationZ(0f).setDuration(120).start();
-        }
     }
 
     private void setupTabs() {
         tabHome.setSelected(true);
-
         tabHome.setOnClickListener(v -> switchTab(true));
         tabApps.setOnClickListener(v -> switchTab(false));
         tabSettings.setOnClickListener(v -> openQuickSettings());
 
-        View.OnFocusChangeListener focus = (v, hasFocus) -> {
-            if (hasFocus) {
-                v.animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start();
-            } else {
-                v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start();
-            }
-        };
-
-        tabHome.setOnFocusChangeListener(focus);
-        tabApps.setOnFocusChangeListener(focus);
-        tabSettings.setOnFocusChangeListener(focus);
-        btnPreviewOpen.setOnFocusChangeListener(focus);
+        View.OnFocusChangeListener tabFocus = (v, hasFocus) -> focusEngine.apply(v, hasFocus);
+        tabHome.setOnFocusChangeListener(tabFocus);
+        tabApps.setOnFocusChangeListener(tabFocus);
+        tabSettings.setOnFocusChangeListener(tabFocus);
+        btnPreviewOpen.setOnFocusChangeListener(tabFocus);
     }
 
     private void switchTab(boolean isHome) {
@@ -168,14 +152,18 @@ public class MainActivity extends Activity {
             tabHome.setSelected(true);
             tabHome.setTextColor(0xFFFFFFFF);
             tabApps.setSelected(false);
-            tabApps.setTextColor(0xFF8F9CAE);
+            tabApps.setTextColor(0xFF9DA8BA);
+            tabSettings.setSelected(false);
+            tabSettings.setTextColor(0xFF9DA8BA);
             viewHome.setVisibility(View.VISIBLE);
             viewApps.setVisibility(View.GONE);
         } else {
             tabHome.setSelected(false);
-            tabHome.setTextColor(0xFF8F9CAE);
+            tabHome.setTextColor(0xFF9DA8BA);
             tabApps.setSelected(true);
             tabApps.setTextColor(0xFFFFFFFF);
+            tabSettings.setSelected(false);
+            tabSettings.setTextColor(0xFF9DA8BA);
             viewHome.setVisibility(View.GONE);
             viewApps.setVisibility(View.VISIBLE);
         }
@@ -210,36 +198,59 @@ public class MainActivity extends Activity {
     }
 
     private void openQuickSettings() {
-        CharSequence[] items = new CharSequence[] {
-                "Wi-Fi",
-                "Bluetooth",
-                "Звук",
-                "Все настройки ТВ",
-                "Выбрать лаунчер по умолчанию"
-        };
-        new AlertDialog.Builder(this)
-                .setTitle("Быстрые настройки")
-                .setItems(items, (dialog, which) -> {
-                    if (which == 0) startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS));
-                    else if (which == 1) startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
-                    else if (which == 2) startActivity(new Intent(Settings.ACTION_SOUND_SETTINGS));
-                    else if (which == 3) startActivity(new Intent(Settings.ACTION_SETTINGS));
-                    else if (which == 4) startActivity(new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS));
-                })
-                .show();
+        QuickSettingsDialog dialog = new QuickSettingsDialog(this, themeManager, new QuickSettingsDialog.Callback() {
+            @Override
+            public void onThemeChanged(String themeId) {
+                focusEngine = themeManager.createFocusEngine();
+                themeManager.applyToActivity(MainActivity.this, findViewById(android.R.id.content));
+                if (favAdapter != null) {
+                    favAdapter = new FavAppsAdapter(MainActivity.this, favApps,
+                            new FavAppsAdapter.OnFavInteractionListener() {
+                                @Override public void onFavFocused(AppModel app) { showAppPreview(app); }
+                                @Override public void onFavClicked(AppModel app) { launchApp(app.getPackageName()); }
+                            }, focusEngine);
+                    rvHomeFavs.setAdapter(favAdapter);
+                }
+                if (gridAdapter != null) {
+                    gridAdapter = new GridAppsAdapter(MainActivity.this, allApps,
+                            new GridAppsAdapter.OnAppInteractionListener() {
+                                @Override public void onAppClick(AppModel app) { launchApp(app.getPackageName()); }
+                                @Override public void onAppLongClick(AppModel app) { showAppOptions(app); }
+                            }, focusEngine);
+                    rvAllApps.setAdapter(gridAdapter);
+                }
+            }
+
+            @Override
+            public void onRequestAppRefresh() { loadApps(); }
+        });
+        dialog.show();
     }
 
     private void showAppOptions(AppModel app) {
-        CharSequence[] options = new CharSequence[] { "Открыть", "О приложении", "Удалить" };
+        boolean isFav = preferencesManager.isFavorite(app.getPackageName());
+        CharSequence[] options = new CharSequence[] {
+                "Открыть",
+                isFav ? "Убрать из избранного" : "Добавить в избранное",
+                "Скрыть",
+                "О приложении",
+                "Удалить"
+        };
         new AlertDialog.Builder(this)
                 .setTitle(app.getLabel())
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) launchApp(app.getPackageName());
                     else if (which == 1) {
+                        preferencesManager.toggleFavorite(app.getPackageName());
+                        loadApps();
+                    } else if (which == 2) {
+                        preferencesManager.hideApp(app.getPackageName());
+                        loadApps();
+                    } else if (which == 3) {
                         Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
                         i.setData(Uri.parse("package:" + app.getPackageName()));
                         startActivity(i);
-                    } else if (which == 2) {
+                    } else if (which == 4) {
                         Intent i = new Intent(Intent.ACTION_DELETE);
                         i.setData(Uri.parse("package:" + app.getPackageName()));
                         startActivity(i);
@@ -293,18 +304,33 @@ public class MainActivity extends Activity {
             }
         }
 
-        allApps.addAll(map.values());
-        Collections.sort(allApps, (a, b) -> a.getLabel().compareToIgnoreCase(b.getLabel()));
+        Set<String> hidden = preferencesManager.getHidden();
+        List<AppModel> visible = new ArrayList<>();
+        for (AppModel app : map.values()) {
+            if (!hidden.contains(app.getPackageName())) visible.add(app);
+        }
+        Collections.sort(visible, (a, b) -> a.getLabel().compareToIgnoreCase(b.getLabel()));
+        allApps.addAll(visible);
 
-        for (int i = 0; i < Math.min(10, allApps.size()); i++) {
-            favApps.add(allApps.get(i));
+        List<String> favOrder = preferencesManager.getFavoritesOrdered();
+        if (favOrder.isEmpty()) {
+            int limit = Math.min(8, allApps.size());
+            for (int i = 0; i < limit; i++) favApps.add(allApps.get(i));
+        } else {
+            Map<String, AppModel> byPkg = new HashMap<>();
+            for (AppModel app : allApps) byPkg.put(app.getPackageName(), app);
+            for (String pkg : favOrder) {
+                AppModel app = byPkg.get(pkg);
+                if (app != null) favApps.add(app);
+            }
+            if (favApps.isEmpty() && !allApps.isEmpty()) {
+                int limit = Math.min(8, allApps.size());
+                for (int i = 0; i < limit; i++) favApps.add(allApps.get(i));
+            }
         }
 
         tvAppsSubheader.setText(allApps.size() + " приложения · только то, что установлено");
-
-        if (!favApps.isEmpty()) {
-            showAppPreview(favApps.get(0));
-        }
+        if (!favApps.isEmpty()) showAppPreview(favApps.get(0));
 
         favAdapter.notifyDataSetChanged();
         gridAdapter.notifyDataSetChanged();
